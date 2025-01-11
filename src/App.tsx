@@ -154,28 +154,30 @@ const App: React.FC = () => {
       ) : (
         <>
           {error && <Alert severity="error">{error}</Alert>}
-          <ContentContainer>
-            {showResults && (
-              <ResultsContainer>
-                {results.map((result) => (
-                  <ResultItem key={result.pageid} onClick={() => onResultClick(result.pageid)}>
-                    <h3>{result.title}</h3>
-                    <Snippet dangerouslySetInnerHTML={{ __html: result.snippet }}></Snippet>
-                    <ReadMore href={`https://en.wikipedia.org/?curid=${result.pageid}`} target="_blank" rel="noopener noreferrer">Read more</ReadMore>
-                  </ResultItem>
+          {(results.length > 0 || selectedArticle) && (
+            <ContentContainer>
+              {showResults && (
+                <ResultsContainer>
+                  {results.map((result) => (
+                    <ResultItem key={result.pageid} onClick={() => onResultClick(result.pageid)}>
+                      <h3>{result.title}</h3>
+                      <Snippet dangerouslySetInnerHTML={{ __html: result.snippet }}></Snippet>
+                      <ReadMore href={`https://en.wikipedia.org/?curid=${result.pageid}`} target="_blank" rel="noopener noreferrer">Read more</ReadMore>
+                    </ResultItem>
+                  ))}
+                </ResultsContainer>
+              )}
+              <ReferencesContainer>
+                <h2>Results</h2>
+                {references.map((ref, index) => (
+                  <ReferenceItem key={index}>
+                    <a href={ref.url} target="_blank" rel="noopener noreferrer">{ref.title}</a>
+                  </ReferenceItem>
                 ))}
-              </ResultsContainer>
-            )}
-            <ReferencesContainer>
-              <h2>Results</h2>
-              {references.map((ref, index) => (
-                <ReferenceItem key={index}>
-                  <a href={ref.url} target="_blank" rel="noopener noreferrer">{ref.title}</a>
-                </ReferenceItem>
-              ))}
-            </ReferencesContainer>
-            <ArticleContainer dangerouslySetInnerHTML={{ __html: selectedArticle }} />
-          </ContentContainer>
+              </ReferencesContainer>
+              <ArticleContainer dangerouslySetInnerHTML={{ __html: selectedArticle }} />
+            </ContentContainer>
+          )}
         </>
       )}
     </Container>
@@ -226,15 +228,20 @@ const StyledTextField = styled(TextField)`
     & fieldset {
       border-color: transparent;
     }
+
     &:hover fieldset {
       border-color: transparent;
     }
+
     &.Mui-focused fieldset {
       border-color: #4285f4;
+      box-shadow: 0 0 8px rgba(66, 133, 244, 0.6); /* Add blue glow */
     }
+
     background-color: #ffffff; /* Set background color to white */
-    color: #202124; /* Set text color to dark */
+    color: #ffffff; /* Set text color to dark */
   }
+
   & .MuiInputBase-input {
     font-size: 20px; /* Increase font size */
     padding: 10px; /* Add padding */
@@ -333,12 +340,6 @@ const ReferenceItem = styled.div`
   text-align: left; /* Align text to the left */
   font-size: 16px; /* Make the font size smaller */
   line-height: 1.5;
-`;
-
-const ReferenceTitle = styled.div`
-  font-size: 16px; /* Make the font size smaller */
-  line-height: 1.5;
-  font-weight: bold;
 `;
 
 export default App;

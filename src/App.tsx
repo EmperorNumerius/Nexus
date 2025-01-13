@@ -108,7 +108,7 @@ const App: React.FC = () => {
   return (
     <Container>
       <Header>
-        <Title variant="h3" component="h1">
+        <Title variant="h1">
           <span>N</span>
           <span>e</span>
           <span>x</span>

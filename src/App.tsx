@@ -31,15 +31,16 @@ const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1';
 const HISTORY_KEY = 'nexus-search-history';
 const THEME_KEY = 'nexus-dark-mode';
+const TWO_YEARS_MS = 1000 * 60 * 60 * 24 * 365 * 2;
+const PREFIX_MATCH_SNIPPET = 'Wikipedia prefix match result';
+const MIN_RESULTS_BEFORE_PREFIX_FALLBACK = 6;
 
 // Rotating Google-style colors for logo letters
 const LOGO_COLORS = ['#4285f4', '#ea4335', '#fbbc05', '#34a853'];
 
 const sanitizeSnippet = (html: string) =>
   html
-    .replace(/<span[^>]*>/gi, '<em>')
-    .replace(/<\/span>/gi, '</em>')
-    .replace(/<(?!\/?em\b)[^>]*>/gi, '')
+    .replace(/<[^>]*>/g, '')
     .replace(/\s+/g, ' ')
     .trim();
 
@@ -53,12 +54,12 @@ const scoreResult = (term: string, result: SearchResult) => {
   if (title === q) score += 100;
   if (title.startsWith(q)) score += 40;
   if (title.includes(q)) score += 20;
-  tokens.forEach(t => {
-    if (title.includes(t)) score += 15;
-    if (snippet.includes(t)) score += 6;
+  tokens.forEach(token => {
+    if (title.includes(token)) score += 15;
+    if (snippet.includes(token)) score += 6;
   });
   if (result.wordcount >= 300 && result.wordcount <= 4000) score += 5;
-  if (result.timestamp && Date.now() - new Date(result.timestamp).getTime() < 1000 * 60 * 60 * 24 * 365 * 2) score += 3;
+  if (result.timestamp && Date.now() - new Date(result.timestamp).getTime() < TWO_YEARS_MS) score += 3;
 
   return score;
 };
@@ -199,7 +200,7 @@ const App: React.FC = () => {
         }),
       );
       let merged = raw;
-      if (raw.length < 6) {
+      if (raw.length < MIN_RESULTS_BEFORE_PREFIX_FALLBACK) {
         const prefixRes = await axios.get(WIKI_API, {
           params: {
             action: 'query',
@@ -214,13 +215,13 @@ const App: React.FC = () => {
           (r: { pageid: number; title: string }) => ({
             pageid: r.pageid,
             title: r.title,
-            snippet: 'Wikipedia prefix match result',
+            snippet: PREFIX_MATCH_SNIPPET,
             wordcount: 0,
             timestamp: '',
           }),
         );
         const byId = new Map<number, SearchResult>();
-        [...raw, ...prefixMapped].forEach(r => byId.set(r.pageid, r));
+        [...prefixMapped, ...raw].forEach(r => byId.set(r.pageid, r));
         merged = Array.from(byId.values());
       }
       const ranked = merged
@@ -331,7 +332,7 @@ const App: React.FC = () => {
                   aria-label="Search"
                 />
                 <HeaderSearchBtn type="submit" $dark={isDark} aria-label="Submit search">
-                  🔍
+                  <span aria-hidden>🔍</span>
                 </HeaderSearchBtn>
               </form>
               {showSuggestions && suggestions.length > 0 && (
@@ -375,7 +376,7 @@ const App: React.FC = () => {
                   aria-label="Search Wikipedia"
                 />
                 <SearchBtn type="submit" disabled={loading} $dark={isDark} aria-label="Submit search">
-                  {loading ? <CircularProgress size={20} color="inherit" /> : '🔍'}
+                  {loading ? <CircularProgress size={20} color="inherit" /> : <span aria-hidden>🔍</span>}
                 </SearchBtn>
               </SearchRow>
             </form>
@@ -383,7 +384,7 @@ const App: React.FC = () => {
               <SuggestBox $dark={isDark}>
                 {suggestions.map(s => (
                     <SuggestItem key={s} $dark={isDark} onClick={() => handleSuggestionPick(s)}>
-                      🔍 {s}
+                      <span aria-hidden>🔍</span> {s}
                     </SuggestItem>
                 ))}
               </SuggestBox>
@@ -392,7 +393,7 @@ const App: React.FC = () => {
 
             <ActionRow>
               <ActionBtn onClick={() => { if (query.trim()) searchWikipedia(query); }} $dark={isDark}>
-                🔍 Search
+                <span aria-hidden>🔍</span> Search
               </ActionBtn>
             <ActionBtn onClick={fetchRandomArticle} $dark={isDark} disabled={loading}>
               &#127922; Random Article
@@ -473,10 +474,7 @@ const App: React.FC = () => {
                       en.wikipedia.org › wiki › {result.title.replace(/ /g, '_')}
                     </ResultCardUrl>
                     <ResultCardTitle $dark={isDark}>{result.title}</ResultCardTitle>
-                    <ResultCardSnippet
-                      $dark={isDark}
-                      dangerouslySetInnerHTML={{ __html: result.snippet }}
-                    />
+                    <ResultCardSnippet $dark={isDark}>{result.snippet}</ResultCardSnippet>
                     <ResultCardMeta $dark={isDark}>
                       {result.wordcount > 0 && <span>~{result.wordcount.toLocaleString()} words</span>}
                       {result.wordcount > 0 && <span aria-hidden>·</span>}
@@ -787,12 +785,17 @@ const SuggestBox = styled.div<DP>`
   z-index: 200;
 `;
 
-const SuggestItem = styled.div<DP>`
+const SuggestItem = styled.button<DP>`
   padding: 10px 16px;
   font-size: 15px;
+  font-family: 'Ubuntu', sans-serif;
   color: ${p => D.text(p.$dark)};
   cursor: pointer;
   transition: background 0.1s;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
   &:hover { background: ${p => D.surfaceHover(p.$dark)}; }
 `;
 
@@ -1023,7 +1026,6 @@ const ResultCardSnippet = styled.p<DP>`
   font-size: 14px;
   line-height: 1.6;
   color: ${p => D.textSub(p.$dark)};
-  & em { font-style: normal; font-weight: 600; color: ${p => D.text(p.$dark)}; }
 `;
 
 const ResultCardMeta = styled.div<DP>`

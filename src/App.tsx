@@ -12,6 +12,7 @@ interface SearchResult {
   snippet: string;
   wordcount: number;
   timestamp: string;
+  score?: number;
 }
 
 interface ArticleSummary {
@@ -30,9 +31,39 @@ const WIKI_API = 'https://en.wikipedia.org/w/api.php';
 const WIKI_REST = 'https://en.wikipedia.org/api/rest_v1';
 const HISTORY_KEY = 'nexus-search-history';
 const THEME_KEY = 'nexus-dark-mode';
+const TWO_YEARS_MS = 1000 * 60 * 60 * 24 * 365 * 2;
+const PREFIX_MATCH_SNIPPET = 'Wikipedia prefix match result';
+const MIN_RESULTS_BEFORE_PREFIX_FALLBACK = 6;
 
 // Rotating Google-style colors for logo letters
 const LOGO_COLORS = ['#4285f4', '#ea4335', '#fbbc05', '#34a853'];
+
+const sanitizeSnippet = (html: string) =>
+  (() => {
+    if (typeof window === 'undefined') return '';
+    const parsed = new window.DOMParser().parseFromString(html, 'text/html');
+    return (parsed.body.textContent ?? '').replace(/\s+/g, ' ').trim();
+  })();
+
+const scoreResult = (term: string, result: SearchResult) => {
+  const q = term.toLowerCase().trim();
+  const tokens = q.split(/\s+/).filter(Boolean);
+  const title = result.title.toLowerCase();
+  const snippet = sanitizeSnippet(result.snippet).toLowerCase();
+
+  let score = 0;
+  if (title === q) score += 100;
+  if (title.startsWith(q)) score += 40;
+  if (title.includes(q)) score += 20;
+  tokens.forEach(token => {
+    if (title.includes(token)) score += 15;
+    if (snippet.includes(token)) score += 6;
+  });
+  if (result.wordcount >= 300 && result.wordcount <= 4000) score += 5;
+  if (result.timestamp && Date.now() - new Date(result.timestamp).getTime() < TWO_YEARS_MS) score += 3;
+
+  return score;
+};
 
 // ─── App ─────────────────────────────────────────────────────────────────────
 
@@ -50,6 +81,7 @@ const App: React.FC = () => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
   const [isDark, setIsDark] = useState(true);
+  const [didYouMean, setDidYouMean] = useState<string | null>(null);
 
   const suggestRef = useRef<HTMLDivElement>(null);
   const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -143,6 +175,7 @@ const App: React.FC = () => {
     if (!term.trim()) return;
     setLoading(true);
     setError(null);
+    setDidYouMean(null);
     setShowSuggestions(false);
     setSuggestions([]);
     try {
@@ -151,8 +184,9 @@ const App: React.FC = () => {
           action: 'query',
           list: 'search',
           srsearch: term,
-          srlimit: 10,
+          srlimit: 20,
           srprop: 'snippet|wordcount|timestamp',
+          srinfo: 'totalhits|suggestion',
           format: 'json',
           origin: '*',
         },
@@ -161,13 +195,42 @@ const App: React.FC = () => {
         (r: { pageid: number; title: string; snippet: string; wordcount: number; timestamp: string }) => ({
           pageid: r.pageid,
           title: r.title,
-          snippet: r.snippet,
+          snippet: sanitizeSnippet(r.snippet),
           wordcount: r.wordcount ?? 0,
           timestamp: r.timestamp ?? '',
         }),
       );
-      setResults(raw);
+      let merged = raw;
+      if (raw.length < MIN_RESULTS_BEFORE_PREFIX_FALLBACK) {
+        const prefixRes = await axios.get(WIKI_API, {
+          params: {
+            action: 'query',
+            list: 'prefixsearch',
+            pssearch: term,
+            pslimit: 8,
+            format: 'json',
+            origin: '*',
+          },
+        });
+        const prefixMapped: SearchResult[] = (prefixRes.data.query?.prefixsearch ?? []).map(
+          (r: { pageid: number; title: string }) => ({
+            pageid: r.pageid,
+            title: r.title,
+            snippet: PREFIX_MATCH_SNIPPET,
+            wordcount: 0,
+            timestamp: '',
+          }),
+        );
+        const byId = new Map<number, SearchResult>();
+        [...prefixMapped, ...raw].forEach(r => byId.set(r.pageid, r));
+        merged = Array.from(byId.values());
+      }
+      const ranked = merged
+        .map(r => ({ ...r, score: scoreResult(term, r) }))
+        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+      setResults(ranked);
       setTotalHits(res.data.query.searchinfo?.totalhits ?? 0);
+      if (res.data.query.searchinfo?.suggestion) setDidYouMean(res.data.query.searchinfo.suggestion);
       saveHistory(term);
       setView('results');
     } catch {
@@ -252,8 +315,9 @@ const App: React.FC = () => {
         <TopBarLeft>
           {view !== 'home' && (
             <LogoSmall onClick={goHome} title="Go home" aria-label="Go home">
+              <LogoGlyph aria-hidden />
               {'Nexus'.split('').map((ch, i) => (
-                <span key={i} style={{ color: LOGO_COLORS[i % LOGO_COLORS.length] }}>{ch}</span>
+                <LogoLetter key={i} style={{ color: LOGO_COLORS[i % LOGO_COLORS.length] }}>{ch}</LogoLetter>
               ))}
             </LogoSmall>
           )}
@@ -269,7 +333,7 @@ const App: React.FC = () => {
                   aria-label="Search"
                 />
                 <HeaderSearchBtn type="submit" $dark={isDark} aria-label="Submit search">
-                  &#128269;
+                  <span aria-hidden>🔍</span>
                 </HeaderSearchBtn>
               </form>
               {showSuggestions && suggestions.length > 0 && (
@@ -293,8 +357,9 @@ const App: React.FC = () => {
       {view === 'home' && (
         <HomeView>
           <LogoBig>
+            <LogoGlyph aria-hidden />
             {'NexusBrowser'.split('').map((ch, i) => (
-              <span key={i} style={{ color: LOGO_COLORS[i % LOGO_COLORS.length] }}>{ch}</span>
+              <LogoLetter key={i} style={{ color: LOGO_COLORS[i % LOGO_COLORS.length] }}>{ch}</LogoLetter>
             ))}
           </LogoBig>
           <Tagline $dark={isDark}>Explore the world's knowledge, powered by Wikipedia</Tagline>
@@ -312,25 +377,25 @@ const App: React.FC = () => {
                   aria-label="Search Wikipedia"
                 />
                 <SearchBtn type="submit" disabled={loading} $dark={isDark} aria-label="Submit search">
-                  {loading ? <CircularProgress size={20} color="inherit" /> : '&#128269;'}
+                  {loading ? <CircularProgress size={20} color="inherit" /> : <span aria-hidden>🔍</span>}
                 </SearchBtn>
               </SearchRow>
             </form>
             {showSuggestions && suggestions.length > 0 && (
               <SuggestBox $dark={isDark}>
                 {suggestions.map(s => (
-                  <SuggestItem key={s} $dark={isDark} onClick={() => handleSuggestionPick(s)}>
-                    &#128269; {s}
-                  </SuggestItem>
+                    <SuggestItem key={s} $dark={isDark} onClick={() => handleSuggestionPick(s)}>
+                      <span aria-hidden>🔍</span> {s}
+                    </SuggestItem>
                 ))}
               </SuggestBox>
             )}
           </SearchWrap>
 
-          <ActionRow>
-            <ActionBtn onClick={() => { if (query.trim()) searchWikipedia(query); }} $dark={isDark}>
-              &#128269; Search
-            </ActionBtn>
+            <ActionRow>
+              <ActionBtn onClick={() => { if (query.trim()) searchWikipedia(query); }} $dark={isDark}>
+                <span aria-hidden>🔍</span> Search
+              </ActionBtn>
             <ActionBtn onClick={fetchRandomArticle} $dark={isDark} disabled={loading}>
               &#127922; Random Article
             </ActionBtn>
@@ -394,6 +459,15 @@ const App: React.FC = () => {
               <ResultsStats $dark={isDark}>
                 About <strong>{formatHits(totalHits)}</strong> results for "{query}"
               </ResultsStats>
+              {didYouMean && (
+                <ResultsSuggestion $dark={isDark}>
+                  Did you mean{' '}
+                  <SuggestionBtn $dark={isDark} onClick={() => { setQuery(didYouMean); searchWikipedia(didYouMean); }}>
+                    {didYouMean}
+                  </SuggestionBtn>
+                  ?
+                </ResultsSuggestion>
+              )}
               <ResultsList>
                 {results.map(result => (
                   <ResultCard key={result.pageid} $dark={isDark} onClick={() => fetchArticle(result.title)}>
@@ -401,10 +475,7 @@ const App: React.FC = () => {
                       en.wikipedia.org › wiki › {result.title.replace(/ /g, '_')}
                     </ResultCardUrl>
                     <ResultCardTitle $dark={isDark}>{result.title}</ResultCardTitle>
-                    <ResultCardSnippet
-                      $dark={isDark}
-                      dangerouslySetInnerHTML={{ __html: result.snippet }}
-                    />
+                    <ResultCardSnippet $dark={isDark}>{result.snippet}</ResultCardSnippet>
                     <ResultCardMeta $dark={isDark}>
                       {result.wordcount > 0 && <span>~{result.wordcount.toLocaleString()} words</span>}
                       {result.wordcount > 0 && <span aria-hidden>·</span>}
@@ -541,6 +612,7 @@ const LogoSmall = styled.button`
   letter-spacing: -0.5px;
   display: flex;
   align-items: center;
+  gap: 8px;
   white-space: nowrap;
   flex-shrink: 0;
   &:focus-visible { outline: 2px solid #4285f4; border-radius: 4px; }
@@ -618,7 +690,32 @@ const LogoBig = styled.h1`
   font-weight: 700;
   letter-spacing: -1px;
   display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0 0 8px;
+`;
+
+const LogoGlyph = styled.span`
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #8ab4ff 0%, #4285f4 45%, #6f42c1 100%);
+  box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.15);
+  position: relative;
+  flex-shrink: 0;
+  &::before, &::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    background: #ffffff;
+    opacity: 0.95;
+  }
+  &::before { width: 6px; height: 6px; left: 6px; top: 8px; }
+  &::after { width: 5px; height: 5px; right: 6px; bottom: 7px; }
+`;
+
+const LogoLetter = styled.span`
+  text-shadow: 0 1px 10px rgba(66, 133, 244, 0.1);
 `;
 
 const Tagline = styled.p<DP>`
@@ -689,13 +786,19 @@ const SuggestBox = styled.div<DP>`
   z-index: 200;
 `;
 
-const SuggestItem = styled.div<DP>`
+const SuggestItem = styled.button<DP>`
   padding: 10px 16px;
   font-size: 15px;
+  font-family: 'Ubuntu', sans-serif;
   color: ${p => D.text(p.$dark)};
   cursor: pointer;
   transition: background 0.1s;
+  border: none;
+  background: transparent;
+  width: 100%;
+  text-align: left;
   &:hover { background: ${p => D.surfaceHover(p.$dark)}; }
+  &:focus-visible { outline: 2px solid ${p => D.accent(p.$dark)}; outline-offset: -2px; }
 `;
 
 const ActionRow = styled.div`
@@ -869,6 +972,24 @@ const ResultsStats = styled.p<DP>`
   margin: 0 0 16px;
 `;
 
+const ResultsSuggestion = styled.p<DP>`
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: ${p => D.textSub(p.$dark)};
+`;
+
+const SuggestionBtn = styled.button<DP>`
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0 2px;
+  color: ${p => D.link(p.$dark)};
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+  &:focus-visible { outline: 2px solid ${p => D.accent(p.$dark)}; border-radius: 4px; }
+`;
+
 const ResultsList = styled.div`
   display: flex;
   flex-direction: column;
@@ -908,7 +1029,6 @@ const ResultCardSnippet = styled.p<DP>`
   font-size: 14px;
   line-height: 1.6;
   color: ${p => D.textSub(p.$dark)};
-  & em { font-style: normal; font-weight: 600; color: ${p => D.text(p.$dark)}; }
 `;
 
 const ResultCardMeta = styled.div<DP>`

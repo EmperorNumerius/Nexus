@@ -12,6 +12,7 @@ interface SearchResult {
   snippet: string;
   wordcount: number;
   timestamp: string;
+  score?: number;
 }
 
 interface ArticleSummary {
@@ -34,6 +35,34 @@ const THEME_KEY = 'nexus-dark-mode';
 // Rotating Google-style colors for logo letters
 const LOGO_COLORS = ['#4285f4', '#ea4335', '#fbbc05', '#34a853'];
 
+const sanitizeSnippet = (html: string) =>
+  html
+    .replace(/<span[^>]*>/gi, '<em>')
+    .replace(/<\/span>/gi, '</em>')
+    .replace(/<(?!\/?em\b)[^>]*>/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const scoreResult = (term: string, result: SearchResult) => {
+  const q = term.toLowerCase().trim();
+  const tokens = q.split(/\s+/).filter(Boolean);
+  const title = result.title.toLowerCase();
+  const snippet = sanitizeSnippet(result.snippet).toLowerCase();
+
+  let score = 0;
+  if (title === q) score += 100;
+  if (title.startsWith(q)) score += 40;
+  if (title.includes(q)) score += 20;
+  tokens.forEach(t => {
+    if (title.includes(t)) score += 15;
+    if (snippet.includes(t)) score += 6;
+  });
+  if (result.wordcount >= 300 && result.wordcount <= 4000) score += 5;
+  if (result.timestamp && Date.now() - new Date(result.timestamp).getTime() < 1000 * 60 * 60 * 24 * 365 * 2) score += 3;
+
+  return score;
+};
+
 // ─── App ─────────────────────────────────────────────────────────────────────
 
 const App: React.FC = () => {
@@ -50,6 +79,7 @@ const App: React.FC = () => {
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [history, setHistory] = useState<string[]>([]);
   const [isDark, setIsDark] = useState(true);
+  const [didYouMean, setDidYouMean] = useState<string | null>(null);
 
   const suggestRef = useRef<HTMLDivElement>(null);
   const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -143,6 +173,7 @@ const App: React.FC = () => {
     if (!term.trim()) return;
     setLoading(true);
     setError(null);
+    setDidYouMean(null);
     setShowSuggestions(false);
     setSuggestions([]);
     try {
@@ -151,8 +182,9 @@ const App: React.FC = () => {
           action: 'query',
           list: 'search',
           srsearch: term,
-          srlimit: 10,
+          srlimit: 20,
           srprop: 'snippet|wordcount|timestamp',
+          srinfo: 'totalhits|suggestion',
           format: 'json',
           origin: '*',
         },
@@ -161,13 +193,42 @@ const App: React.FC = () => {
         (r: { pageid: number; title: string; snippet: string; wordcount: number; timestamp: string }) => ({
           pageid: r.pageid,
           title: r.title,
-          snippet: r.snippet,
+          snippet: sanitizeSnippet(r.snippet),
           wordcount: r.wordcount ?? 0,
           timestamp: r.timestamp ?? '',
         }),
       );
-      setResults(raw);
+      let merged = raw;
+      if (raw.length < 6) {
+        const prefixRes = await axios.get(WIKI_API, {
+          params: {
+            action: 'query',
+            list: 'prefixsearch',
+            pssearch: term,
+            pslimit: 8,
+            format: 'json',
+            origin: '*',
+          },
+        });
+        const prefixMapped: SearchResult[] = (prefixRes.data.query?.prefixsearch ?? []).map(
+          (r: { pageid: number; title: string }) => ({
+            pageid: r.pageid,
+            title: r.title,
+            snippet: 'Wikipedia prefix match result',
+            wordcount: 0,
+            timestamp: '',
+          }),
+        );
+        const byId = new Map<number, SearchResult>();
+        [...raw, ...prefixMapped].forEach(r => byId.set(r.pageid, r));
+        merged = Array.from(byId.values());
+      }
+      const ranked = merged
+        .map(r => ({ ...r, score: scoreResult(term, r) }))
+        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+      setResults(ranked);
       setTotalHits(res.data.query.searchinfo?.totalhits ?? 0);
+      if (res.data.query.searchinfo?.suggestion) setDidYouMean(res.data.query.searchinfo.suggestion);
       saveHistory(term);
       setView('results');
     } catch {
@@ -252,8 +313,9 @@ const App: React.FC = () => {
         <TopBarLeft>
           {view !== 'home' && (
             <LogoSmall onClick={goHome} title="Go home" aria-label="Go home">
+              <LogoGlyph aria-hidden />
               {'Nexus'.split('').map((ch, i) => (
-                <span key={i} style={{ color: LOGO_COLORS[i % LOGO_COLORS.length] }}>{ch}</span>
+                <LogoLetter key={i} style={{ color: LOGO_COLORS[i % LOGO_COLORS.length] }}>{ch}</LogoLetter>
               ))}
             </LogoSmall>
           )}
@@ -269,7 +331,7 @@ const App: React.FC = () => {
                   aria-label="Search"
                 />
                 <HeaderSearchBtn type="submit" $dark={isDark} aria-label="Submit search">
-                  &#128269;
+                  🔍
                 </HeaderSearchBtn>
               </form>
               {showSuggestions && suggestions.length > 0 && (
@@ -293,8 +355,9 @@ const App: React.FC = () => {
       {view === 'home' && (
         <HomeView>
           <LogoBig>
+            <LogoGlyph aria-hidden />
             {'NexusBrowser'.split('').map((ch, i) => (
-              <span key={i} style={{ color: LOGO_COLORS[i % LOGO_COLORS.length] }}>{ch}</span>
+              <LogoLetter key={i} style={{ color: LOGO_COLORS[i % LOGO_COLORS.length] }}>{ch}</LogoLetter>
             ))}
           </LogoBig>
           <Tagline $dark={isDark}>Explore the world's knowledge, powered by Wikipedia</Tagline>
@@ -312,25 +375,25 @@ const App: React.FC = () => {
                   aria-label="Search Wikipedia"
                 />
                 <SearchBtn type="submit" disabled={loading} $dark={isDark} aria-label="Submit search">
-                  {loading ? <CircularProgress size={20} color="inherit" /> : '&#128269;'}
+                  {loading ? <CircularProgress size={20} color="inherit" /> : '🔍'}
                 </SearchBtn>
               </SearchRow>
             </form>
             {showSuggestions && suggestions.length > 0 && (
               <SuggestBox $dark={isDark}>
                 {suggestions.map(s => (
-                  <SuggestItem key={s} $dark={isDark} onClick={() => handleSuggestionPick(s)}>
-                    &#128269; {s}
-                  </SuggestItem>
+                    <SuggestItem key={s} $dark={isDark} onClick={() => handleSuggestionPick(s)}>
+                      🔍 {s}
+                    </SuggestItem>
                 ))}
               </SuggestBox>
             )}
           </SearchWrap>
 
-          <ActionRow>
-            <ActionBtn onClick={() => { if (query.trim()) searchWikipedia(query); }} $dark={isDark}>
-              &#128269; Search
-            </ActionBtn>
+            <ActionRow>
+              <ActionBtn onClick={() => { if (query.trim()) searchWikipedia(query); }} $dark={isDark}>
+                🔍 Search
+              </ActionBtn>
             <ActionBtn onClick={fetchRandomArticle} $dark={isDark} disabled={loading}>
               &#127922; Random Article
             </ActionBtn>
@@ -394,6 +457,15 @@ const App: React.FC = () => {
               <ResultsStats $dark={isDark}>
                 About <strong>{formatHits(totalHits)}</strong> results for "{query}"
               </ResultsStats>
+              {didYouMean && (
+                <ResultsSuggestion $dark={isDark}>
+                  Did you mean{' '}
+                  <SuggestionBtn $dark={isDark} onClick={() => { setQuery(didYouMean); searchWikipedia(didYouMean); }}>
+                    {didYouMean}
+                  </SuggestionBtn>
+                  ?
+                </ResultsSuggestion>
+              )}
               <ResultsList>
                 {results.map(result => (
                   <ResultCard key={result.pageid} $dark={isDark} onClick={() => fetchArticle(result.title)}>
@@ -541,6 +613,7 @@ const LogoSmall = styled.button`
   letter-spacing: -0.5px;
   display: flex;
   align-items: center;
+  gap: 8px;
   white-space: nowrap;
   flex-shrink: 0;
   &:focus-visible { outline: 2px solid #4285f4; border-radius: 4px; }
@@ -618,7 +691,32 @@ const LogoBig = styled.h1`
   font-weight: 700;
   letter-spacing: -1px;
   display: flex;
+  align-items: center;
+  gap: 10px;
   margin: 0 0 8px;
+`;
+
+const LogoGlyph = styled.span`
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 30% 30%, #8ab4ff 0%, #4285f4 45%, #6f42c1 100%);
+  box-shadow: 0 0 0 3px rgba(66, 133, 244, 0.15);
+  position: relative;
+  flex-shrink: 0;
+  &::before, &::after {
+    content: '';
+    position: absolute;
+    border-radius: 50%;
+    background: #ffffff;
+    opacity: 0.95;
+  }
+  &::before { width: 6px; height: 6px; left: 6px; top: 8px; }
+  &::after { width: 5px; height: 5px; right: 6px; bottom: 7px; }
+`;
+
+const LogoLetter = styled.span`
+  text-shadow: 0 1px 10px rgba(66, 133, 244, 0.1);
 `;
 
 const Tagline = styled.p<DP>`
@@ -867,6 +965,23 @@ const ResultsStats = styled.p<DP>`
   font-size: 13px;
   color: ${p => D.textSub(p.$dark)};
   margin: 0 0 16px;
+`;
+
+const ResultsSuggestion = styled.p<DP>`
+  margin: 0 0 12px;
+  font-size: 14px;
+  color: ${p => D.textSub(p.$dark)};
+`;
+
+const SuggestionBtn = styled.button<DP>`
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0 2px;
+  color: ${p => D.link(p.$dark)};
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
 `;
 
 const ResultsList = styled.div`

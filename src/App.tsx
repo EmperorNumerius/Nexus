@@ -39,10 +39,11 @@ const MIN_RESULTS_BEFORE_PREFIX_FALLBACK = 6;
 const LOGO_COLORS = ['#4285f4', '#ea4335', '#fbbc05', '#34a853'];
 
 const sanitizeSnippet = (html: string) =>
-  html
-    .replace(/<[^>]*>/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+  (() => {
+    if (typeof window === 'undefined') return '';
+    const parsed = new window.DOMParser().parseFromString(html, 'text/html');
+    return (parsed.body.textContent ?? '').replace(/\s+/g, ' ').trim();
+  })();
 
 const scoreResult = (term: string, result: SearchResult) => {
   const q = term.toLowerCase().trim();
@@ -797,6 +798,7 @@ const SuggestItem = styled.button<DP>`
   width: 100%;
   text-align: left;
   &:hover { background: ${p => D.surfaceHover(p.$dark)}; }
+  &:focus-visible { outline: 2px solid ${p => D.accent(p.$dark)}; outline-offset: -2px; }
 `;
 
 const ActionRow = styled.div`
@@ -985,6 +987,7 @@ const SuggestionBtn = styled.button<DP>`
   cursor: pointer;
   font: inherit;
   text-decoration: underline;
+  &:focus-visible { outline: 2px solid ${p => D.accent(p.$dark)}; border-radius: 4px; }
 `;
 
 const ResultsList = styled.div`

@@ -4,7 +4,9 @@
   "build": {
     "command": "npm run build"
   },
-  "pages_build_output_dir": "./dist",
+  "assets": {
+    "directory": "./dist"
+  },
   "compatibility_date": "2025-09-27",
   "compatibility_flags": [
     "nodejs_compat"

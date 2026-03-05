@@ -1,6 +1,6 @@
 import React from 'react';
 import styled from 'styled-components';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, Variants } from 'framer-motion';
 import { Loader2, ExternalLink, ChevronRight } from 'lucide-react';
 import { SearchResult } from '../hooks/useWikipedia';
 
@@ -27,12 +27,12 @@ export const ResultsView: React.FC<ResultsViewProps> = ({
   isDark, loading, articleLoading, error, results, totalHits, query,
   didYouMean, setQuery, searchWikipedia, fetchArticle
 }) => {
-  const containerVariants = {
+  const containerVariants: Variants = {
     hidden: { opacity: 0 },
     show: { opacity: 1, transition: { staggerChildren: 0.05 } }
   };
 
-  const itemVariants = {
+  const itemVariants: Variants = {
     hidden: { opacity: 0, y: 15 },
     show: { opacity: 1, y: 0, transition: { type: 'spring', stiffness: 300, damping: 24 } }
   };

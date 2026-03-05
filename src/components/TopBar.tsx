@@ -23,7 +23,7 @@ interface TopBarProps {
 const LOGO_COLORS = ['#4285f4', '#ea4335', '#fbbc05', '#34a853'];
 
 export const TopBar: React.FC<TopBarProps> = ({
-  isDark, toggleDark, query, setQuery, showSuggestions, setShowSuggestions,
+  isDark, toggleDark, query, showSuggestions, setShowSuggestions,
   suggestions, handleSearch, handleQueryChange, handleSuggestionPick,
   goHome, view, startVoiceSearch, isListening
 }) => {

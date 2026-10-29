@@ -18,6 +18,7 @@ export interface SearchResult {
 
 export interface ArticleSummary {
   title: string;
+  normalizedtitle?: string;
   description?: string;
   extract: string;
   thumbnail?: { source: string; width: number; height: number };

@@ -165,7 +165,7 @@ export const HomeView: React.FC<HomeViewProps> = ({
               <FeaturedImg src={featuredArticle.thumbnail.source} alt={featuredArticle.title} loading="lazy" />
             )}
             <FeaturedBody>
-              <FeaturedTitle $dark={isDark}>{featuredArticle.title}</FeaturedTitle>
+              <FeaturedTitle $dark={isDark}>{featuredArticle.normalizedtitle ?? featuredArticle.title.replace(/_/g, ' ')}</FeaturedTitle>
               {featuredArticle.description && <FeaturedDesc $dark={isDark}>{featuredArticle.description}</FeaturedDesc>}
               <FeaturedExtract $dark={isDark}>
                 {featuredArticle.extract.length > 250 ? `${featuredArticle.extract.slice(0, 250)}...` : featuredArticle.extract}
